@@ -22,38 +22,6 @@ type BPTreeForEncode struct {
 	Head KeyAndValue
 }
 
-// 索引节点
-type IndexNode struct {
-	Keys       []string     // 关键字，非叶子节点才有
-	Children   []*IndexNode // 叶子结点没有children
-	ParentNode *IndexNode
-
-	IsLeaf    bool        // 是否是叶子结点
-	DataNodes []*DataNode // 叶子结点才有数据结点
-}
-
-// 用于序列化的结构体
-type IndexNodeForEncode struct {
-	IsLeaf       bool
-	Keys         []string
-	Children     []*IndexNode // 叶子结点没有children
-	KeyAndValues []KeyAndValue
-	ParentNode   *IndexNode
-}
-
-// 叶子的数据节点
-type DataNode struct {
-	KeyAndValue      KeyAndValue
-	ParentNode       *IndexNode
-	PreviousDataNode *DataNode
-	NextDataNode     *DataNode
-}
-
-type KeyAndValue struct {
-	Key   string // key 关键字
-	Value string // value是对应数据在levelDB中的id、地址或者nil，内部节点的value为nil
-}
-
 /**
    BPTree 自定义 序列化
  */
@@ -155,58 +123,6 @@ func (t *BPTree) UnmarshalJSON(bytes []byte) error {
 	return nil
 }
 
-/**
-  IndexNode 自定义序列化
- */
-func (indexNode *IndexNode) MarshalJSON() ([]byte, error) {
-
-	indexNodeForEncode := new(IndexNodeForEncode)
-	indexNodeForEncode.IsLeaf = indexNode.IsLeaf
-
-	if indexNode.IsLeaf {
-		for _, dataNode := range indexNode.DataNodes {
-			indexNodeForEncode.KeyAndValues = append(indexNodeForEncode.KeyAndValues, dataNode.KeyAndValue)
-		}
-	} else {
-		indexNodeForEncode.Keys = indexNode.Keys
-		indexNodeForEncode.Children = indexNode.Children
-	}
-	return json.Marshal(indexNodeForEncode)
-
-}
-
-/**
-	IndexNode 自定义反序列化
- */
-func (indexNode *IndexNode) UnmarshalJSON(bytes []byte) error {
-	var iNodeForEncode = new(IndexNodeForEncode)
-
-	err := json.Unmarshal(bytes, &iNodeForEncode)
-	if err != nil {
-		return err
-	}
-	indexNode.IsLeaf = iNodeForEncode.IsLeaf
-
-	if iNodeForEncode.IsLeaf {
-		var previousDataNode *DataNode
-		for i, kv := range iNodeForEncode.KeyAndValues {
-			dataNode := MallocNewDataNode(kv)
-			dataNode.ParentNode = indexNode
-			// previousNode and nextNode
-			if i != 0 {
-				dataNode.PreviousDataNode = previousDataNode
-				previousDataNode.NextDataNode = dataNode
-			}
-			previousDataNode = dataNode
-			indexNode.DataNodes = append(indexNode.DataNodes, dataNode)
-		}
-	} else {
-		indexNode.Keys = iNodeForEncode.Keys
-		indexNode.Children = iNodeForEncode.Children
-	}
-	return nil
-}
-
 // 初始化一个B+ 树
 func MallocNewBPTree(m int) *BPTree {
 
@@ -215,19 +131,6 @@ func MallocNewBPTree(m int) *BPTree {
 		M:    m,
 		Root: node,
 		Head: nil}
-}
-
-// 初始化一个node
-func MallocNewIndexNode(isLeaf bool) *IndexNode {
-	return &IndexNode{
-		IsLeaf: isLeaf,
-	}
-}
-
-// 初始化一个数据结点
-func MallocNewDataNode(keyAndValue KeyAndValue) *DataNode {
-	return &DataNode{
-		KeyAndValue: keyAndValue}
 }
 
 // 插入一个关键字和值
@@ -256,40 +159,11 @@ func (t *BPTree) Insert(keyAndValue KeyAndValue) (*DataNode, error) {
 		}
 		// 不存在时，新增一个数据结点dataNode
 		newDataNode := MallocNewDataNode(keyAndValue)
-		newDataNode.ParentNode = indexNode
+		// 插入新的 dataNode
+		indexNode.insertDataNode(newDataNode, previousDataNodeIndex)
 
-		// 新增节点的Key小于当前组的所有值
-		if previousDataNodeIndex < 0 {
-
-			// 将数据结点按顺序左右链接起来
-			newDataNode.PreviousDataNode = indexNode.DataNodes[0].PreviousDataNode
-			newDataNode.NextDataNode = indexNode.DataNodes[0]
-			indexNode.DataNodes[0].PreviousDataNode = newDataNode
-
-			// 合并到DataNodes[]中
-			indexNode.DataNodes = append([]*DataNode{newDataNode}, indexNode.DataNodes[:]...)
-
-		} else {
-
-			// 将叶子结点按顺序左右链接起来
-			newDataNode.PreviousDataNode = indexNode.DataNodes[previousDataNodeIndex]
-			newDataNode.NextDataNode = indexNode.DataNodes[previousDataNodeIndex].NextDataNode
-
-			// 合并到DataNodes[]中
-			tempSlice := append([]*DataNode{}, indexNode.DataNodes[:previousDataNodeIndex+1]...)
-			tempSlice = append(tempSlice, newDataNode)
-			tempSlice = append(tempSlice, indexNode.DataNodes[previousDataNodeIndex+1:]...)
-			indexNode.DataNodes = tempSlice
-		}
-
-		if newDataNode.PreviousDataNode != nil {
-			newDataNode.PreviousDataNode.NextDataNode = newDataNode
-		} else {
+		if newDataNode.PreviousDataNode == nil {
 			t.Head = newDataNode // 新的头结点
-		}
-
-		if newDataNode.NextDataNode != nil {
-			newDataNode.NextDataNode.PreviousDataNode = newDataNode
 		}
 
 		// 树分裂
@@ -336,15 +210,15 @@ returns:
   dataNode: key所在dataNode
  */
 func (t *BPTree) searchDataNode(key string) (currentIndexNode *IndexNode, dataNode *DataNode, preDataNodeIndexAtCurrentIndexNode int, nextDataIndexAtCurrentNode int) {
-	indexNode, _ := binarySearchIndexNode(t.Root, key)
+	indexNode, _ := t.Root.binarySearchChildNode(key)
 	if indexNode == nil {
 		return nil, nil, -1, -1
 	}
 	for !indexNode.IsLeaf {
-		indexNode, _ = binarySearchIndexNode(indexNode, key)
+		indexNode, _ = indexNode.binarySearchChildNode(key)
 	}
 	// 此处用二分查找 找到key所在叶子节点上DataNodes中的位置
-	indexNode, previousDataNodeIndex, nextDataNodeIndex := binarySearchDataNode(indexNode, key)
+	indexNode, previousDataNodeIndex, nextDataNodeIndex := indexNode.binarySearchDataNode(key)
 	// 存在这个key
 	if previousDataNodeIndex == nextDataNodeIndex && previousDataNodeIndex >= 0 {
 		fmt.Printf("-----Get key:%s  value:%s , key [%s] is already exist --\n", key, indexNode.DataNodes[previousDataNodeIndex].KeyAndValue.Value, key)
@@ -367,21 +241,10 @@ func (t *BPTree) Remove(key string) (bool, error) {
 
 	// 存在该key,直接删除
 	if removeDataNode != nil {
-
-		// 修改被删除dataNode的前后dataNode的左右连接关系
-		if removeDataNode.PreviousDataNode != nil {
-			removeDataNode.PreviousDataNode.NextDataNode = removeDataNode.NextDataNode
-		} else {
+		if removeDataNode.PreviousDataNode == nil {
 			t.Head = removeDataNode.NextDataNode
 		}
-		if removeDataNode.NextDataNode != nil {
-			removeDataNode.NextDataNode.PreviousDataNode = removeDataNode.PreviousDataNode
-		}
-		// 删除节点
-		tempSlice := append([]*DataNode{}, indexNode.DataNodes[:indexAtParent]...)
-		tempSlice = append(tempSlice, indexNode.DataNodes[indexAtParent+1:]...)
-		indexNode.DataNodes = tempSlice
-
+		indexNode.removeDataNode(removeDataNode, indexAtParent)
 		// 合并
 		t.merge(indexNode)
 		return true, nil
@@ -404,7 +267,7 @@ func (t *BPTree) merge(indexNode *IndexNode) {
 		}
 		fmt.Println("---合并叶子节点-----")
 		// 找到当前indexNode所在数组中的Index
-		_, indexAtParent := binarySearchIndexNode(indexNode.ParentNode, indexNode.DataNodes[0].KeyAndValue.Key)
+		_, indexAtParent := indexNode.ParentNode.binarySearchChildNode(indexNode.DataNodes[0].KeyAndValue.Key)
 		if indexAtParent == 0 { // 找右兄弟
 			rightNode := indexNode.ParentNode.Children[indexAtParent+1]
 			// 如果右兄弟的dataNode > t.M/2 ,就借一个， 右兄弟的值都比左兄弟的大
@@ -461,16 +324,12 @@ func (t *BPTree) merge(indexNode *IndexNode) {
 				}
 
 				// 父节点中删除indexNode
-				tempSlice := append([]*IndexNode{}, indexNode.ParentNode.Children[:indexAtParent]...)
-				tempSlice = append(tempSlice, indexNode.ParentNode.Children[indexAtParent+1:]...)
-				indexNode.ParentNode.Children = tempSlice
+				indexNode.ParentNode.removeChild(indexAtParent)
 
 				// 如果父节点的keys.len >1
 				if len(indexNode.ParentNode.Keys) > 1 {
 					// 父节点中删除相应的key
-					tempKeySlice := append([]string{}, indexNode.ParentNode.Keys[:indexAtParent-1]...)
-					tempKeySlice = append(tempKeySlice, indexNode.ParentNode.Keys[indexAtParent:]...)
-					indexNode.ParentNode.Keys = tempKeySlice
+					indexNode.ParentNode.removeKey(indexAtParent)
 				} else { // 说明parentNode可能是root节点
 
 					t.Root = leftNode
@@ -485,7 +344,7 @@ func (t *BPTree) merge(indexNode *IndexNode) {
 		}
 		fmt.Println("---合并索引节点-----")
 		// 找到当前indexNode所在数组中的Index
-		_, indexAtParent := binarySearchIndexNode(indexNode.ParentNode, indexNode.Keys[0])
+		_, indexAtParent := indexNode.ParentNode.binarySearchChildNode(indexNode.Keys[0])
 
 		if indexAtParent == 0 { // 找右兄弟
 			rightNode := indexNode.ParentNode.Children[indexAtParent+1]
@@ -556,13 +415,10 @@ func (t *BPTree) merge(indexNode *IndexNode) {
 
 				if len(indexNode.ParentNode.Keys) > 1 {
 					// 父节点中删除indexNode
-					tempSlice := append([]*IndexNode{}, indexNode.ParentNode.Children[:indexAtParent]...)
-					tempSlice = append(tempSlice, indexNode.ParentNode.Children[indexAtParent+1:]...)
-					indexNode.ParentNode.Children = tempSlice
+					indexNode.ParentNode.removeChild(indexAtParent)
 					// 父节点中删除相应的key
-					tempKeySlice := append([]string{}, indexNode.ParentNode.Keys[:indexAtParent-1]...)
-					tempKeySlice = append(tempKeySlice, indexNode.ParentNode.Keys[indexAtParent:]...)
-					indexNode.ParentNode.Keys = tempKeySlice
+					indexNode.ParentNode.removeKey(indexAtParent)
+
 				} else {
 					leftNode.ParentNode = nil
 					t.Root = leftNode
@@ -608,24 +464,11 @@ func (t *BPTree) divide(indexNode *IndexNode) {
 			t.Root = newRootNode // root节点指针上移
 		} else {
 
-			newRightIndexNode.ParentNode = indexNode.ParentNode
-
-			previous, _ := binarySearchIndexKey(indexNode.ParentNode.Keys, newRightIndexNode.DataNodes[0].KeyAndValue.Key)
-
+			previous, _ := indexNode.ParentNode.binarySearchIndexKey(newRightIndexNode.DataNodes[0].KeyAndValue.Key)
 			// 合并Keys
-			if previous < 0 {
-				indexNode.ParentNode.Keys = append([]string{newRightIndexNode.DataNodes[0].KeyAndValue.Key}, indexNode.ParentNode.Keys[:]...)
-			} else {
-				tempSlice := append([]string{}, indexNode.ParentNode.Keys[:previous+1]...)
-				tempSlice = append(tempSlice, newRightIndexNode.DataNodes[0].KeyAndValue.Key)
-				tempSlice = append(tempSlice, indexNode.ParentNode.Keys[previous+1:]...)
-				indexNode.ParentNode.Keys = tempSlice
-			}
+			indexNode.ParentNode.insertKey(newRightIndexNode.DataNodes[0].KeyAndValue.Key, previous)
 			// 合并child
-			tempChildSlice := append([]*IndexNode{}, indexNode.ParentNode.Children[:previous+2]...)
-			tempChildSlice = append(tempChildSlice, newRightIndexNode)
-			tempChildSlice = append(tempChildSlice, indexNode.ParentNode.Children[previous+2:]...)
-			indexNode.ParentNode.Children = tempChildSlice
+			indexNode.ParentNode.insertChild(newRightIndexNode, previous)
 		}
 
 	} else if !indexNode.IsLeaf && len(indexNode.Keys) > t.M {
@@ -653,25 +496,12 @@ func (t *BPTree) divide(indexNode *IndexNode) {
 			t.Root = newRootNode // root节点指针上移
 		} else {
 
-			newRightIndexNode.ParentNode = indexNode.ParentNode
-			previous, _ := binarySearchIndexKey(indexNode.ParentNode.Keys, indexNode.Keys[0])
-
+			previous, _ := indexNode.ParentNode.binarySearchIndexKey(indexNode.Keys[0])
 			// 合并Keys
-			if previous < 0 {
-				indexNode.ParentNode.Keys = append([]string{indexNode.Keys[t.M/2]}, indexNode.ParentNode.Keys[:]...)
+			indexNode.ParentNode.insertKey(indexNode.Keys[t.M/2], previous)
 
-			} else {
-				// slice  左闭右开 [ )
-				tempSlice := append([]string{}, indexNode.ParentNode.Keys[:previous+1]...)
-				tempSlice = append(tempSlice, indexNode.Keys[t.M/2])
-				tempSlice = append(tempSlice, indexNode.ParentNode.Keys[previous+1:]...)
-				indexNode.ParentNode.Keys = tempSlice
-			}
 			// 合并child
-			tempChildSlice := append([]*IndexNode{}, indexNode.ParentNode.Children[:previous+2]...)
-			tempChildSlice = append(tempChildSlice, newRightIndexNode)
-			tempChildSlice = append(tempChildSlice, indexNode.ParentNode.Children[previous+2:]...)
-			indexNode.ParentNode.Children = tempChildSlice
+			indexNode.ParentNode.insertChild(newRightIndexNode, previous)
 		}
 		// 左边部分，成为Children原父节点的子节点
 		indexNode.Children = indexNode.Children[:t.M/2+1]
@@ -682,6 +512,7 @@ func (t *BPTree) divide(indexNode *IndexNode) {
 }
 
 func (t *BPTree) Traversal() {
+	fmt.Println()
 	p := t.Head
 	// 遍历
 	for p != nil {

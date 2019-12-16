@@ -6,8 +6,6 @@ import (
 	"github.com/mycode/BPlusTree/bptree"
 	"encoding/json"
 	"log"
-	"math/rand"
-	"time"
 )
 
 const M = 4
@@ -17,19 +15,19 @@ func main() {
 	t1 := bptree.MallocNewBPTree(M)
 
 	keyArray := []int{55, 34, 15, 95, 99, 98, 81, 16, 99, 14, 36, 13, 77, 57, 37, 2, 39, 3, 89, 76}
-	//for _, key := range keyArray {
+	for _, key := range keyArray {
 
-	for n := 0; n < 50; n++ {
-		rand.Seed(time.Now().UnixNano())
-		key := rand.Intn(100)
+		//for n := 0; n < 50; n++ {
+		//	rand.Seed(time.Now().UnixNano())
+		//	key := rand.Intn(100)
 		keystr := strconv.Itoa(key)
 		keyAndValue := bptree.KeyAndValue{
 			"k" + keystr, "v" + keystr}
 		//fmt.Printf("开始插入： key:%s  \n\n", keyAndValue.Key)
 		//
 		t1.Insert(keyAndValue)
-		//t.UpToDownPrint()
-		//bpTree.Traversal()
+		t1.UpToDownPrint()
+		//t1.Traversal()
 		fmt.Println()
 		fmt.Println()
 	}
