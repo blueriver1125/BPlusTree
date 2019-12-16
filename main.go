@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"fmt"
 	"github.com/mycode/BPlusTree/bptree"
+	"encoding/json"
+	"log"
 	"math/rand"
 	"time"
 )
@@ -12,12 +14,12 @@ const M = 4
 
 func main() {
 
-	t := bptree.MallocNewBPTree(M)
+	t1 := bptree.MallocNewBPTree(M)
 
 	keyArray := []int{55, 34, 15, 95, 99, 98, 81, 16, 99, 14, 36, 13, 77, 57, 37, 2, 39, 3, 89, 76}
 	//for _, key := range keyArray {
 
-	for n := 0; n < 100; n++ {
+	for n := 0; n < 50; n++ {
 		rand.Seed(time.Now().UnixNano())
 		key := rand.Intn(100)
 		keystr := strconv.Itoa(key)
@@ -25,8 +27,8 @@ func main() {
 			"k" + keystr, "v" + keystr}
 		//fmt.Printf("开始插入： key:%s  \n\n", keyAndValue.Key)
 		//
-		t.Insert(keyAndValue)
-		t.UpToDownPrint()
+		t1.Insert(keyAndValue)
+		//t.UpToDownPrint()
 		//bpTree.Traversal()
 		fmt.Println()
 		fmt.Println()
@@ -54,28 +56,43 @@ func main() {
 	updateKV8 := bptree.KeyAndValue{
 		"k99", "v99修改值"}
 
-	_, err := t.Update(updateKV1)
+	_, err := t1.Update(updateKV1)
 	if err != nil {
 		fmt.Println(err)
 	}
-	t.Update(updateKV2)
-	t.Update(updateKV3)
-	t.Update(updateKV4)
-	t.Update(updateKV5)
-	t.Update(updateKV6)
-	t.Update(updateKV7)
-	t.Update(updateKV8)
+	t1.Update(updateKV2)
+	t1.Update(updateKV3)
+	t1.Update(updateKV4)
+	t1.Update(updateKV5)
+	t1.Update(updateKV6)
+	t1.Update(updateKV7)
+	t1.Update(updateKV8)
+	t1.UpToDownPrint()
+
+	fmt.Println("------序列化----------")
+	data, err := json.Marshal(t1)
+	if err != nil {
+		log.Panic(err)
+	}
+	fmt.Println(string(data))
+	fmt.Println("---------------反序列化-----------------")
+	var t = &bptree.BPTree{}
+	err = json.Unmarshal(data, t)
+	//t := t1
 	t.UpToDownPrint()
+
+	fmt.Println("----遍历叶子-------------")
+	t.Traversal()
 
 	fmt.Println()
 	t.Get("k99")
 	t.Get("k13")
 	t.Get("k15")
-	t.Get("k39")
-	t.Get("k81")
-	t.Get("k95")
-	t.Get("k55")
-	t.Get("k99")
+	//t.Get("k39")
+	//t.Get("k81")
+	//t.Get("k95")
+	//t.Get("k55")
+	//t.Get("k99")
 
 	t.Remove("k16")
 	t.UpToDownPrint()
@@ -92,11 +109,11 @@ func main() {
 	t.Get("k99")
 	t.Get("k13")
 	t.Get("k15")
-	t.Get("k39")
-	t.Get("k81")
-	t.Get("k95")
-	t.Get("k55")
-	t.Get("k99")
+	//t.Get("k39")
+	//t.Get("k81")
+	//t.Get("k95")
+	//t.Get("k55")
+	//t.Get("k99")
 
 	t.Remove("k55")
 	t.UpToDownPrint()
@@ -116,12 +133,12 @@ func main() {
 	t.Remove("k99")
 	t.UpToDownPrint()
 
-	t.Get("k99")
-	t.Get("k13")
-	t.Get("k15")
-	t.Get("k39")
-	t.Get("k81")
-	t.Get("k95")
+	//t.Get("k99")
+	//t.Get("k13")
+	//t.Get("k15")
+	//t.Get("k39")
+	//t.Get("k81")
+	//t.Get("k95")
 	t.Get("k55")
 	t.Get("k99")
 

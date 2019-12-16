@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"strings"
+	"encoding/json"
 )
 
 // B+ 树
@@ -14,6 +15,13 @@ type BPTree struct {
 	Head *DataNode  // 头结点
 }
 
+// 用于序列化的结构体
+type BPTreeForEncode struct {
+	M    int
+	Root IndexNodeForEncode
+	Head KeyAndValue
+}
+
 // 索引节点
 type IndexNode struct {
 	Keys       []string     // 关键字，非叶子节点才有
@@ -22,6 +30,15 @@ type IndexNode struct {
 
 	IsLeaf    bool        // 是否是叶子结点
 	DataNodes []*DataNode // 叶子结点才有数据结点
+}
+
+// 用于序列化的结构体
+type IndexNodeForEncode struct {
+	IsLeaf       bool
+	Keys         []string
+	Children     []*IndexNode // 叶子结点没有children
+	KeyAndValues []KeyAndValue
+	ParentNode   *IndexNode
 }
 
 // 叶子的数据节点
@@ -35,6 +52,159 @@ type DataNode struct {
 type KeyAndValue struct {
 	Key   string // key 关键字
 	Value string // value是对应数据在levelDB中的id、地址或者nil，内部节点的value为nil
+}
+
+/**
+   BPTree 自定义 序列化
+ */
+func (t *BPTree) MarshalJSON() ([]byte, error) {
+
+	bpTreeForEncode := new(BPTreeForEncode)
+
+	bpTreeForEncode.M = t.M
+	rootNodeForEncode := new(IndexNodeForEncode)
+	rootNodeForEncode.IsLeaf = t.Root.IsLeaf
+
+	if t.Root.IsLeaf {
+		for _, dataNode := range t.Root.DataNodes {
+			rootNodeForEncode.KeyAndValues = append(rootNodeForEncode.KeyAndValues, dataNode.KeyAndValue)
+		}
+	} else {
+		rootNodeForEncode.Keys = t.Root.Keys
+		rootNodeForEncode.Children = t.Root.Children
+	}
+	bpTreeForEncode.Root = *rootNodeForEncode
+	return json.Marshal(bpTreeForEncode)
+}
+
+/**
+  BPTree 自定义反序列化
+ */
+func (t *BPTree) UnmarshalJSON(bytes []byte) error {
+	var bpTreeForEncode BPTreeForEncode
+	err := json.Unmarshal(bytes, &bpTreeForEncode)
+	if err != nil {
+		return err
+	}
+	var rootNode = &IndexNode{}
+	rootNode.IsLeaf = bpTreeForEncode.Root.IsLeaf
+	rootNode.Children = bpTreeForEncode.Root.Children
+	rootNode.Keys = bpTreeForEncode.Root.Keys
+	t.M = bpTreeForEncode.M
+
+	for _, node := range rootNode.Children {
+		node.ParentNode = rootNode
+	}
+
+	if bpTreeForEncode.Root.IsLeaf {
+		var previousDataNode *DataNode
+		for i, kv := range bpTreeForEncode.Root.KeyAndValues {
+			dataNode := MallocNewDataNode(kv)
+			dataNode.ParentNode = rootNode
+			// previousNode and nextNode
+			if i != 0 {
+				dataNode.PreviousDataNode = previousDataNode
+				previousDataNode.NextDataNode = dataNode
+			}
+			previousDataNode = dataNode
+			rootNode.DataNodes = append(rootNode.DataNodes, dataNode)
+		}
+		t.Head = rootNode.DataNodes[0]
+	} else {
+
+		var leafIndexNodeParentArray []*IndexNode
+		var tempArray []*IndexNode
+		//
+		if !bpTreeForEncode.Root.Children[0].IsLeaf {
+			tempArray = bpTreeForEncode.Root.Children
+		}
+
+		for len(tempArray) > 0 {
+			leafIndexNodeParentArray = tempArray
+			var newTempArray []*IndexNode
+			for _, node := range tempArray {
+				for _, childNode := range node.Children {
+					childNode.ParentNode = node
+				}
+				if !node.Children[0].IsLeaf {
+					newTempArray = append(newTempArray, node.Children[:]...)
+				}
+			}
+			tempArray = newTempArray
+		}
+
+		var tmpPreviousDataNode *DataNode
+		// 连接
+		for i, iNode := range leafIndexNodeParentArray {
+			if i == 0 {
+				t.Head = iNode.Children[0].DataNodes[0]
+			}
+
+			for _, child := range iNode.Children {
+
+				if tmpPreviousDataNode != nil {
+					child.DataNodes[0].PreviousDataNode = tmpPreviousDataNode
+					tmpPreviousDataNode.NextDataNode = child.DataNodes[0]
+				}
+				tmpPreviousDataNode = child.DataNodes[len(child.DataNodes)-1]
+			}
+		}
+	}
+
+	t.Root = rootNode
+	return nil
+}
+
+/**
+  IndexNode 自定义序列化
+ */
+func (indexNode *IndexNode) MarshalJSON() ([]byte, error) {
+
+	indexNodeForEncode := new(IndexNodeForEncode)
+	indexNodeForEncode.IsLeaf = indexNode.IsLeaf
+
+	if indexNode.IsLeaf {
+		for _, dataNode := range indexNode.DataNodes {
+			indexNodeForEncode.KeyAndValues = append(indexNodeForEncode.KeyAndValues, dataNode.KeyAndValue)
+		}
+	} else {
+		indexNodeForEncode.Keys = indexNode.Keys
+		indexNodeForEncode.Children = indexNode.Children
+	}
+	return json.Marshal(indexNodeForEncode)
+
+}
+
+/**
+	IndexNode 自定义反序列化
+ */
+func (indexNode *IndexNode) UnmarshalJSON(bytes []byte) error {
+	var iNodeForEncode = new(IndexNodeForEncode)
+
+	err := json.Unmarshal(bytes, &iNodeForEncode)
+	if err != nil {
+		return err
+	}
+	indexNode.IsLeaf = iNodeForEncode.IsLeaf
+
+	if iNodeForEncode.IsLeaf {
+		var previousDataNode *DataNode
+		for i, kv := range iNodeForEncode.KeyAndValues {
+			dataNode := MallocNewDataNode(kv)
+			dataNode.ParentNode = indexNode
+			// previousNode and nextNode
+			if i != 0 {
+				dataNode.PreviousDataNode = previousDataNode
+				previousDataNode.NextDataNode = dataNode
+			}
+			previousDataNode = dataNode
+			indexNode.DataNodes = append(indexNode.DataNodes, dataNode)
+		}
+	} else {
+		indexNode.Keys = iNodeForEncode.Keys
+		indexNode.Children = iNodeForEncode.Children
+	}
+	return nil
 }
 
 // 初始化一个B+ 树
@@ -167,6 +337,9 @@ returns:
  */
 func (t *BPTree) searchDataNode(key string) (currentIndexNode *IndexNode, dataNode *DataNode, preDataNodeIndexAtCurrentIndexNode int, nextDataIndexAtCurrentNode int) {
 	indexNode, _ := binarySearchIndexNode(t.Root, key)
+	if indexNode == nil {
+		return nil, nil, -1, -1
+	}
 	for !indexNode.IsLeaf {
 		indexNode, _ = binarySearchIndexNode(indexNode, key)
 	}
@@ -183,7 +356,7 @@ func (t *BPTree) searchDataNode(key string) (currentIndexNode *IndexNode, dataNo
 }
 
 func (t *BPTree) Remove(key string) (bool, error) {
-	fmt.Printf("------delete %s----- \n", key)
+	fmt.Printf("\n------delete %s----- \n", key)
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return false, errors.New("key is nil")
