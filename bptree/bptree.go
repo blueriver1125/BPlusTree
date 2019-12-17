@@ -77,7 +77,9 @@ func (t *BPTree) UnmarshalJSON(bytes []byte) error {
 			previousDataNode = dataNode
 			rootNode.DataNodes = append(rootNode.DataNodes, dataNode)
 		}
-		t.Head = rootNode.DataNodes[0]
+		if len(rootNode.DataNodes) > 0 {
+			t.Head = rootNode.DataNodes[0]
+		}
 	} else {
 
 		leafIndexNodeParentArray := []*IndexNode{rootNode}
@@ -350,9 +352,10 @@ func (t *BPTree) merge(indexNode *IndexNode) {
 			rightNode := indexNode.ParentNode.Children[indexAtParent+1]
 			// 右兄弟有富余key
 			if len(rightNode.Keys) > t.M/2 {
+				oldParentKey := indexNode.ParentNode.Keys[0]
 				borrowKey := rightNode.Keys[0]
-				// 借的key加入到indexNode的keys中
-				indexNode.Keys = append(indexNode.Keys, borrowKey)
+				// 旧的父节点的key下降 加入到indexNode的keys中
+				indexNode.Keys = append(indexNode.Keys, oldParentKey)
 				// 借的key对应的child 加入到indexNode的children中
 				rightNode.Children[0].ParentNode = indexNode
 				indexNode.Children = append(indexNode.Children, rightNode.Children[0])
@@ -387,10 +390,11 @@ func (t *BPTree) merge(indexNode *IndexNode) {
 			leftNode := indexNode.ParentNode.Children[indexAtParent-1]
 
 			if len(leftNode.Keys) > t.M/2 {
-				// 借的key
+				// 借的key 替换父节点key
+				oldParentKey := indexNode.ParentNode.Keys[indexAtParent-1]
 				borrowKey := leftNode.Keys[len(leftNode.Keys)-1]
-				// 加入到indexNode
-				indexNode.Keys = append([]string{borrowKey}, indexNode.Keys[:]...)
+				// 原父关键字 加入到indexNode
+				indexNode.Keys = append([]string{oldParentKey}, indexNode.Keys[:]...)
 				// 借的key对应的child加入到indexNode
 				borrowChild := leftNode.Children[len(leftNode.Children)-1]
 				borrowChild.ParentNode = indexNode
@@ -435,7 +439,7 @@ func (t *BPTree) divide(indexNode *IndexNode) {
 	if indexNode == nil {
 		return
 	}
-	if indexNode.IsLeaf && len(indexNode.DataNodes) > t.M {
+	if indexNode.IsLeaf && len(indexNode.DataNodes) >= t.M {
 		fmt.Printf("-----  分裂树:叶子节点 ------- %d  \n", len(indexNode.DataNodes))
 		// 子节点个数是否大于阶数M 时，分裂树
 
@@ -471,7 +475,7 @@ func (t *BPTree) divide(indexNode *IndexNode) {
 			indexNode.ParentNode.insertChild(newRightIndexNode, previous)
 		}
 
-	} else if !indexNode.IsLeaf && len(indexNode.Keys) > t.M {
+	} else if !indexNode.IsLeaf && len(indexNode.Keys) >= t.M {
 		fmt.Printf("-----  分裂树：索引节点 -------keyNum: %d ,keys: %s \n", len(indexNode.Keys), indexNode.Keys)
 		// 新生成一个右索引节点
 		newRightIndexNode := MallocNewIndexNode(false)
