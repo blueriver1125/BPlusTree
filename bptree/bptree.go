@@ -80,7 +80,7 @@ func (t *BPTree) UnmarshalJSON(bytes []byte) error {
 		t.Head = rootNode.DataNodes[0]
 	} else {
 
-		var leafIndexNodeParentArray []*IndexNode
+		leafIndexNodeParentArray := []*IndexNode{rootNode}
 		var tempArray []*IndexNode
 		//
 		if !bpTreeForEncode.Root.Children[0].IsLeaf {
