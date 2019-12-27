@@ -16,7 +16,7 @@ type DataNode struct {
 
 type KeyAndValue struct {
 	Key   string // key 关键字
-	Value string // value是对应数据在levelDB中的id、地址或者nil，内部节点的value为nil
+	Value string // value是对应数据在levelDB中的id、地址或者nil
 }
 
 func (indexNode *IndexNode) insertDataNode(newDataNode *DataNode, previousDataNodeIndex int) {

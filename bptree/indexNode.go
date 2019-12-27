@@ -154,7 +154,7 @@ func (indexNode *IndexNode) binarySearchIndexKey(key string) (previousKeyIndex i
 		if indexNode.Keys[mid] == key {
 			return mid, mid
 		} else if key > indexNode.Keys[mid] { // 如果新的key 大于中间值的key,则查找右边
-			if mid == height-1 || (mid < height-1 && key < indexNode.Keys[mid+1]) {
+			if mid == height-1 || (mid < len(indexNode.Keys)-1 && key < indexNode.Keys[mid+1]) {
 				return mid, mid + 1
 			}
 			low = mid + 1
